@@ -4,7 +4,7 @@
 //using namespace std;
 
 void saluta(std::string nome) {
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 6; i++) {
     std::cout << "Ciao, " << nome << "!" << std::endl;
   }
 }
@@ -12,7 +12,7 @@ void saluta(std::string nome) {
 int main() {
 
   std::jthread t1(saluta, "Bob");
-  //std::jthread t2;
+  std::jthread t2(saluta, "Alice");
   
 std::cout << "Fine del main" << std::endl;
 
