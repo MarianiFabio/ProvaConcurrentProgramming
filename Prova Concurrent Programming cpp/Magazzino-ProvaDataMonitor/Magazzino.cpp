@@ -3,39 +3,52 @@
 #include <thread>
 #include <mutex>
 
+class MailBox {
+private:
+    int pacco = -1; // -1 indica vuoto
+    std::mutex mtx;
+    std::condition_variable cv;
 
-std::mutex mtx;
-std::condition_variable cv;
-int pacco = -1;
+public:
+    void deposita(int id) {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [this]() { return pacco == -1; }); // aspetta che sia vuoto
 
-void depostitaPacco(int id) {
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait(lock, [] { return pacco == -1; });
-    
         pacco = id;
-        std::cout << "Pacco " << id << " depositato." << std::endl;
-    
-    cv.notify_one();
-}
+        std::cout << "Depositato pacco: " << id << std::endl;
 
-void ritiraPacco() {
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait(lock, [] { return pacco != -1; });
-    if (pacco != -1) {
-        std::cout << "Pacco " << pacco << " ritirato." << std::endl;
-        pacco = -1;
-    } else {
-        std::cout << "Nessun pacco da ritirare." << std::endl;
+        cv.notify_one(); // sveglia chi aspetta di ritirare
     }
-    cv.notify_one();
-}
+
+    int ritira() {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [this]() { return pacco != -1; }); // aspetta che ci sia un pacco
+
+        int valore = pacco;
+        pacco = -1;
+        std::cout << "Ritirato pacco: " << valore << std::endl;
+
+        cv.notify_one(); // sveglia chi aspetta di depositare
+        return valore;
+    }
+};
+
 
 int main() {
-    for (int i = 0; i < 5; ++i) {
-        depostitaPacco(42);
-    std::jthread consumatore(ritiraPacco);
-    }
-    
+
+MailBox mailbox;
+
+    {
+    std::jthread produttore([&mailbox] {
+        for (int i = 0; i < 5; ++i)
+            mailbox.deposita(i);
+    });
+
+    std::jthread consumatore([&mailbox] {
+        for (int i = 0; i < 5; ++i)
+            mailbox.ritira();
+    });
+    }// Qui i distruttori attendono la fine dei thread
 
     std::cout << "Fine del main" << std::endl;
 
