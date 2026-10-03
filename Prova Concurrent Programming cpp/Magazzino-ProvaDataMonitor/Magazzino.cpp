@@ -3,14 +3,50 @@
 #include <thread>
 #include <mutex>
 
+
+
+
 class MailBox {
 private:
-    int pacco = -1; // -1 indica vuoto
+    static const int dim = 15;
+    int magazzino[dim];
+    int count = 0;
     std::mutex mtx;
     std::condition_variable cv;
 
+
 public:
-    void deposita(int id) {
+
+    void deposita(int idPacco){
+
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [this]() { return count < dim; });
+        magazzino[count] = idPacco;
+        std::cout << "Depositato pacco: " << magazzino[count] << std::endl;
+        count++;
+        cv.notify_one();
+    }
+
+    void ritira(){
+        int pacco;
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [this]() { return count > 0; });
+        count--;
+        pacco = magazzino[count];
+        magazzino[count] = -1;
+        std::cout << "Ritirato pacco: " << pacco << std::endl;
+        cv.notify_one();
+    }
+
+
+
+
+
+
+
+
+
+    /* void deposita(int id) {
         std::unique_lock<std::mutex> lock(mtx);
         cv.wait(lock, [this]() { return pacco == -1; }); // aspetta che sia vuoto
 
@@ -30,7 +66,9 @@ public:
 
         cv.notify_one(); // sveglia chi aspetta di depositare
         return valore;
-    }
+    } */
+
+
 };
 
 
@@ -38,7 +76,21 @@ int main() {
 
 MailBox mailbox;
 
-    {
+std::jthread produttore ([&mailbox]{
+    for (int i = 0; i < 25; ++i)
+            mailbox.deposita(i);
+});
+
+std::jthread consumatore([&mailbox] {
+        for (int i = 0; i < 15; ++i)
+            mailbox.ritira();
+});
+
+
+
+
+
+    /* {
     std::jthread produttore([&mailbox] {
         for (int i = 0; i < 5; ++i)
             mailbox.deposita(i);
@@ -48,7 +100,7 @@ MailBox mailbox;
         for (int i = 0; i < 5; ++i)
             mailbox.ritira();
     });
-    }// Qui i distruttori attendono la fine dei thread
+    }// Qui i distruttori attendono la fine dei thread */
 
     std::cout << "Fine del main" << std::endl;
 
