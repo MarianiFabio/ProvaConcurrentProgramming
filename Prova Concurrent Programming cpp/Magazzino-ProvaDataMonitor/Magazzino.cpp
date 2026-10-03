@@ -3,11 +3,19 @@
 #include <mutex>
 #include <condition_variable>
 
+
+
+
+
 class MailBox {
 private:
-    static const int dim = 15;
-    int magazzino[dim];
+    static const int capacita = 15;
+    int magazzino[capacita];
     int count = 0;
+
+    int tail = 0;
+    int head = 0;
+
     bool finished = false; // 1. Flag di fine lavoro
 
     std::mutex mtx;
@@ -15,6 +23,21 @@ private:
     std::condition_variable not_empty;
 
 public:
+
+    void addItem (int item) {
+        magazzino[tail] = item;
+        tail = (tail + 1) % capacita;
+        count++;
+    }
+
+    int removeItem () {
+        int item = 0;
+        item = magazzino[tail];
+        head = (head + 1) % capacita;
+        count--;
+        return item;
+    }
+
     void deposita(int idPacco) {
         std::unique_lock<std::mutex> lock(mtx);
         
