@@ -4,14 +4,13 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include "nlohmann/json.hpp" 
 
 using json = nlohmann::json;
-
-
-
 
 /*
  * - This code process cycling climb segments loaded from a JSON file.
@@ -28,6 +27,19 @@ using json = nlohmann::json;
 
 // Mutex used to avoid mixed terminal output
 std::mutex coutMutex;
+std::chrono::steady_clock::time_point programStart;
+
+template <typename... Args>
+void logLine(const Args&... args) {
+    std::lock_guard<std::mutex> lock(coutMutex);
+    const auto elapsedMilliseconds =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - programStart).count();
+
+    std::cout << "[+" << std::setw(6) << std::setfill('0')
+              << elapsedMilliseconds << " ms] " << std::setfill(' ');
+    (std::cout << ... << args) << std::endl;
+}
 
 // Structure to store raw climb data from the file
 struct ClimbData {
@@ -232,11 +244,7 @@ void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& res
     // Loop until removeItem returns false
     while (dataMonitor.removeItem(item)) {
         processedCount++;
-
-        {
-            std::lock_guard<std::mutex> lock(coutMutex);
-            std::cout << "[WORKER " << workerId << "] Took item: " << item.segmentName << std::endl;
-        }
+        logLine("[WORKER ", workerId, "] Took item: ", item.segmentName);
 
         // Heavy math done outside the monitors in parallel
         double np = computeNormalizedPower(item);
@@ -249,13 +257,12 @@ void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& res
         }
     }
 
-    {
-        std::lock_guard<std::mutex> lock(coutMutex);
-        std::cout << "[WORKER " << workerId << "] Done." << std::endl;
-    }
+    logLine("[WORKER ", workerId, "] Done.");
 }
 
 int main() {
+    programStart = std::chrono::steady_clock::now();
+
     DataMonitor dataMonitor;
     SortedResultMonitor resultMonitor;
 
@@ -276,22 +283,15 @@ int main() {
     }
 
     // Main thread
-    std::cout << "[MAIN] Starting data insertion into DataMonitor..." << std::endl;
+    logLine("[MAIN] Starting data insertion into DataMonitor...");
 
     for (size_t i = 0; i < inputData.size(); ++i) {
         dataMonitor.addItem(inputData[i]);
-        
-        {
-            std::lock_guard<std::mutex> lock(coutMutex);
-            std::cout << "[MAIN] Inserted item " << (i + 1) << "/" << inputData.size() 
-                      << ": " << inputData[i].segmentName << std::endl;
-        }
+        logLine("[MAIN] Inserted item ", (i + 1), "/", inputData.size(),
+                ": ", inputData[i].segmentName);
     }
 
-    {
-        std::lock_guard<std::mutex> lock(coutMutex);
-        std::cout << "[MAIN] All items inserted. Calling setFinished()." << std::endl;
-    }
+    logLine("[MAIN] All items inserted. Calling setFinished().");
     dataMonitor.setFinished();
 
     // Wait for all workers to complete
@@ -304,6 +304,6 @@ int main() {
     // Save final output file
     writeResultFile("IFU-3_MarianiF_L1_rez.txt", resultMonitor, processedCounts, passedCounts);
 
-    std::cout << "Done. Output file generated." << std::endl;
+    logLine("Done. Output file generated.");
     return 0;
 }
