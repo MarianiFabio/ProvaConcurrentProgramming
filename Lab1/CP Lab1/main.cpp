@@ -10,6 +10,22 @@
 
 using json = nlohmann::json;
 
+
+
+
+/*
+ * - This code process cycling climb segments loaded from a JSON file.
+ * - Each climb consists of:
+ *     1) segmentName (string)
+ *     2) durationSeconds (int)
+ *     3) averageWatts (double)
+ *
+ * Computation & Filter:
+ * - For each climb, workers compute "Normalized Power" using a heavy,
+ *   CPU-bound loop (20 million iterations simulating variable watt stress).
+ * - Filter criterion: only climbs with Normalized Power >= 300.0 W are kept.
+ */
+
 // Mutex used to avoid mixed terminal output
 std::mutex coutMutex;
 
@@ -57,7 +73,7 @@ struct ClimbResult {
 // Heavy calculation running 20 million steps (CPU bound)
 double computeNormalizedPower(const ClimbData& climb) {
     double accumulatedStress = 0.0;
-    const int STEPS = 20000000;
+    const int STEPS = 50000000;
     double frequency = 1.0 / static_cast<double>(climb.durationSeconds);
 
     for (int i = 0; i < STEPS; ++i) {
@@ -243,7 +259,7 @@ int main() {
     DataMonitor dataMonitor;
     SortedResultMonitor resultMonitor;
 
-    std::string filename = "IFU-3_MarianiF_L1_dat_1.json";
+    std::string filename = "IFU-3_MarianiF_L1_dat_3.json";
     std::vector<ClimbData> inputData = readDataFile(filename);
 
     const int NUM_WORKERS = 4;
@@ -259,7 +275,7 @@ int main() {
         ));
     }
 
-    // Main thread acts as the producer
+    // Main thread
     std::cout << "[MAIN] Starting data insertion into DataMonitor..." << std::endl;
 
     for (size_t i = 0; i < inputData.size(); ++i) {
