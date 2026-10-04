@@ -21,14 +21,27 @@ using json = nlohmann::json;
  *
  * Computation & Filter:
  * - For each climb, workers compute "Normalized Power" using a heavy,
- *   CPU-bound loop (20 million iterations simulating variable watt stress).
+ *   CPU-bound loop (50 million iterations simulating variable watt stress).
  * - Filter criterion: only climbs with Normalized Power >= 300.0 W are kept.
+ * 
+ * 
+ *
+ * AI USAGE DECLARATION:
+ * - Generative AI tools were used EXCLUSIVELY for sequential support tasks:
+ *      1) JSON data parsing (readDataFile)
+ *      2) Formatted text table export (writeResultFile)
+ *      3) Synthetic CPU-bound workload simulation (computeNormalizedPower)
+ * - All concurrent architectures (DataMonitor, SortedResultMonitor, thread
+ *  lifecycle, critical sections, and conditional variables) were designed
+ *   and implemented without AI
  */
 
-// Mutex used to avoid mixed terminal output
+// Mutex used to avoid mixed terminal output and prevent interleaved terminal lines
 std::mutex coutMutex;
 std::chrono::steady_clock::time_point programStart;
 
+// [AI-GENERATED]
+// Thread-safe console logger with millisecond timestamps to visualize concurrency
 template <typename... Args>
 void logLine(const Args&... args) {
     std::lock_guard<std::mutex> lock(coutMutex);
@@ -48,6 +61,7 @@ struct ClimbData {
     double averageWatts;
 };
 
+// [AI-GENERATED]
 // Reads data from the input JSON file
 std::vector<ClimbData> readDataFile(const std::string& filePath) {
     std::vector<ClimbData> climbs;
@@ -82,7 +96,8 @@ struct ClimbResult {
     double normalizedPower;
 };
 
-// Heavy calculation running 20 million steps (CPU bound)
+// [AI-GENERATED]
+// Heavy calculation running 50 million steps (CPU bound workload)
 double computeNormalizedPower(const ClimbData& climb) {
     double accumulatedStress = 0.0;
     const int STEPS = 50000000;
@@ -96,13 +111,14 @@ double computeNormalizedPower(const ClimbData& climb) {
     return std::pow(accumulatedStress / STEPS, 0.25);
 }
 
+// [NO-AI]
 // Monitor for storing processed results in descending order
 class SortedResultMonitor {
 private:
     static const int CAPACITY = 30; 
-    ClimbResult buffer[CAPACITY];
+    ClimbResult buffer[CAPACITY];       // Fixed-size array
     int count = 0;                  
-    std::mutex mtx;   
+    std::mutex mtx;                     // Ensures mutual exclusion across worker threads
 
 public:
     // Inserts an item keeping the array sorted by normalizedPower
@@ -111,7 +127,7 @@ public:
 
         int i = count - 1; 
 
-        // Shift smaller items to the right
+        // Shift smaller items to the right to make room
         while (i >= 0 && buffer[i].normalizedPower < item.normalizedPower) {
             buffer[i + 1] = buffer[i]; 
             i--;                       
@@ -132,6 +148,7 @@ public:
     }
 };
 
+// [AI-GENERATED]
 // Writes the final results and worker stats to the text file
 void writeResultFile(const std::string& outputPath, 
                      SortedResultMonitor& resMon, 
@@ -177,6 +194,7 @@ void writeResultFile(const std::string& outputPath,
     outFile.close();
 }
 
+// [NO-AI]
 // Bounded buffer monitor for items waiting to be processed
 class DataMonitor {
 private:
@@ -236,6 +254,7 @@ public:
     }
 };
 
+// [NO-AI]
 // Task executed by worker threads
 void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& resultMonitor,
                 int& processedCount, int& passedCount) {
@@ -260,13 +279,14 @@ void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& res
     logLine("[WORKER ", workerId, "] Done.");
 }
 
+// [NO-AI]
 int main() {
     programStart = std::chrono::steady_clock::now();
 
     DataMonitor dataMonitor;
     SortedResultMonitor resultMonitor;
 
-    std::string filename = "IFU-3_MarianiF_L1_dat_3.json";
+    std::string filename = "IFU-3_MarianiF_L1_dat_1.json";
     std::vector<ClimbData> inputData = readDataFile(filename);
 
     const int NUM_WORKERS = 4;
