@@ -10,6 +10,9 @@
 
 using json = nlohmann::json;
 
+
+std::mutex coutMutex;
+
 // SelectedDataStructure: Cycling Climb Data taken from json file
 struct ClimbData {
     std::string segmentName;
@@ -64,6 +67,95 @@ double computeNormalizedPower(const ClimbData& climb) {
     }
     return std::pow(accumulatedStress / STEPS, 0.25);
 }
+
+
+class SortedResultMonitor {
+    private:
+    
+    static const int CAPACITY = 30; 
+    ClimbResult buffer[CAPACITY];
+
+    int count = 0;                  
+
+    std::mutex mtx;   
+
+    public:
+
+    void addItemSorted(const ClimbResult& item) {
+        std::lock_guard<std::mutex> lock(mtx); 
+
+        int i = count - 1; 
+
+        while (i >= 0 && buffer[i].normalizedPower < item.normalizedPower) {
+            buffer[i + 1] = buffer[i]; 
+            i--;                       
+        }
+
+
+        buffer[i + 1] = item;
+        count++; 
+    }
+
+    int getCount() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return count;
+    }
+
+    ClimbResult getItem(int index) {
+        std::lock_guard<std::mutex> lock(mtx);
+        return buffer[index];
+    }
+
+};
+
+void writeResultFile(const std::string& outputPath, 
+                     SortedResultMonitor& resMon, 
+                     const std::vector<int>& processed, 
+                     const std::vector<int>& passed) {
+    
+    std::ofstream outFile(outputPath);
+    if (!outFile.is_open()) {
+        std::cerr << "Errore nella creazione del file di output." << std::endl;
+        return;
+    }
+
+    // Intestazione tabella
+    outFile << std::left 
+            << std::setw(5)  << "No." 
+            << std::setw(30) << "Segment Name" 
+            << std::setw(15) << "Duration (s)" 
+            << std::setw(15) << "Avg Watts" 
+            << std::setw(15) << "Norm Power" << "\n";
+    outFile << std::string(80, '-') << "\n";
+
+    // Righe ordinate
+    int totalResults = resMon.getCount();
+    for (int i = 0; i < totalResults; i++) {
+        auto item = resMon.getItem(i);
+        outFile << std::left 
+                << std::setw(5)  << (i + 1)
+                << std::setw(30) << item.originalData.segmentName
+                << std::setw(15) << item.originalData.durationSeconds
+                << std::setw(15) << std::fixed << std::setprecision(1) << item.originalData.averageWatts
+                << std::setw(15) << std::fixed << std::setprecision(2) << item.normalizedPower 
+                << "\n";
+    }
+    outFile << std::string(80, '-') << "\n\n";
+
+    // Statistiche per ciascun thread richieste dal docente
+    for (size_t id = 0; id < processed.size(); id++) {
+        outFile << "Thread " << id << ": " 
+                << passed[id] << " items passed, " 
+                << processed[id] << " total\n";
+    }
+
+    outFile.close();
+}
+
+
+
+
+
 
 
 class DataMonitor {
@@ -123,21 +215,40 @@ class DataMonitor {
 
 };
 
-class SortedResultMonitor {
-    private:
-    public:
-};
 
-void workerTask(int workerId,
-                DataMonitor& dataMonitor,
-                SortedResultMonitor& resultMonitor,
-                int& processedCount,
-                int& matchedCount) {
-    
+void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& resultMonitor,
+                int& processedCount, int& passedCount) {
+    ClimbData item;
+
+    // Continua finché ci sono dati nel monitor[cite: 1, 4]
+    while (dataMonitor.removeItem(item)) {
+        processedCount++;
+
+        // Singola riga: notifica dell'avvenuto prelievo protetta da lock
+        {
+            std::lock_guard<std::mutex> lock(coutMutex);
+            std::cout << "[WORKER " << workerId << "] Ha prelevato: " << item.segmentName << std::endl;
+        }
+
+        // Calcolo CPU-bound fuori dal monitor e senza blocchi[cite: 1, 8]
+        double np = computeNormalizedPower(item);
+
+        if (np >= 300.0) {
+            passedCount++;
+            ClimbResult resItem{item, np};
+            resultMonitor.addItemSorted(resItem);
+        }
+    }
+
+    // Singola riga finale: notifica che il worker ha terminato il lavoro[cite: 1, 4]
+    {
+        std::lock_guard<std::mutex> lock(coutMutex);
+        std::cout << "[WORKER " << workerId << "] Ha finito tutto." << std::endl;
+    }
 }
 
 
-/* 
+
 int main() {
     DataMonitor dataMonitor;
     SortedResultMonitor resultMonitor;
@@ -147,89 +258,48 @@ int main() {
 
     const int NUM_WORKERS = 4;
     std::vector<std::jthread> workers;
-    int processedCounts[NUM_WORKERS] = {0};
-    int matchedCounts[NUM_WORKERS] = {0};
+    std::vector<int> processedCounts(NUM_WORKERS, 0);
+    std::vector<int> passedCounts(NUM_WORKERS, 0);
     
-
+    // workers thread
     for (int i = 0; i < NUM_WORKERS; i++) {
     workers.push_back(std::jthread(
-        workerTask, 
-        i, 
-        std::ref(dataMonitor), 
-        std::ref(resultMonitor),
-        std::ref(processedCounts[i]),
-        std::ref(matchedCounts[i])
+        workerTask, i, std::ref(dataMonitor), std::ref(resultMonitor),
+        std::ref(processedCounts[i]), std::ref(passedCounts[i])
     ));
     }
 
-    for (size_t i = 0; i < inputData.size(); i++) {
+    // main thread
+    std::cout << "[MAIN] Avvio inserimento dati nel DataMonitor..." << std::endl;
+
+    for (size_t i = 0; i < inputData.size(); ++i) {
     dataMonitor.addItem(inputData[i]);
-    }
-
     
-    dataMonitor.setFinished();
-
-    return 0;
-} */
-
-// Mutex solo per non accavallare le stampe su console
-std::mutex cout_mtx;
-
-void testWorker(int id, DataMonitor& monitor, int& localCount) {
-    ClimbData climb;
-    while (monitor.removeItem(climb)) {
-        localCount++;
-        {
-            std::lock_guard<std::mutex> printLock(cout_mtx);
-            std::cout << "[Worker " << id << "] Elabora: " << climb.segmentName 
-                      << " (" << climb.averageWatts << " W)\n";
-        }
-    }
+    // Stampa sincronizzata
     {
-        std::lock_guard<std::mutex> printLock(cout_mtx);
-        std::cout << ">>> Worker " << id << " ha terminato. Totale presi: " << localCount << "\n";
+        std::lock_guard<std::mutex> lock(coutMutex);
+        std::cout << "[MAIN] Inserito elemento " << (i + 1) << "/" << inputData.size() 
+                  << ": " << inputData[i].segmentName << std::endl;
     }
+    }
+
+{
+    std::lock_guard<std::mutex> lock(coutMutex);
+    std::cout << "[MAIN] Tutti gli elementi inseriti. Chiamata a setFinished()." << std::endl;
 }
+dataMonitor.setFinished();
 
-int main() {
-    DataMonitor monitor;
-    const int NUM_WORKERS = 4;
-    std::vector<int> counts(NUM_WORKERS, 0);
-    std::vector<std::jthread> workers;
 
-    // 1. Avvio dei 4 worker concorrenti
-    for (int i = 0; i < NUM_WORKERS; ++i) {
-        workers.push_back(std::jthread(testWorker, i, std::ref(monitor), std::ref(counts[i])));
+    for (int i = 0; i < NUM_WORKERS; i++) {
+    if (workers[i].joinable()) {
+        workers[i].join();
+    }
     }
 
-    // 2. Il Main Thread inserisce 30 elementi (il buffer tiene solo 15 posti)
-    std::cout << "[Main] Inizio inserimento di 30 salite...\n";
-    for (int i = 1; i <= 30; ++i) {
-        ClimbData data{"Salita_" + std::to_string(i), 1000 + i * 10, 250.0 + i * 3.0};
-        monitor.addItem(data);
-    }
-    std::cout << "[Main] Inserite tutte le 30 salite. Chiamata a setFinished().\n";
+writeResultFile("IFU-3_MarianiF_L1_rez.txt", resultMonitor, processedCounts, passedCounts);
 
-    // 3. Segnala fine dei dati
-    monitor.setFinished();
-
-    // 4. I jthread effettuano automaticamente il join all'uscita dello scope
-    workers.clear();
-
-    // 5. Verifica quadratura dei conti
-    int totaleElaborati = 0;
-    for (int i = 0; i < NUM_WORKERS; ++i) {
-        totaleElaborati += counts[i];
-    }
-
-    std::cout << "\n----------------------------------------\n";
-    std::cout << "Elementi totali immessi dal Main: 30\n";
-    std::cout << "Elementi totali estratti dai Worker: " << totaleElaborati << "\n";
-    if (totaleElaborati == 30) {
-        std::cout << "[ESITO TEST: OK] Nessun dato perso, nessun blocco o deadlock!\n";
-    } else {
-        std::cout << "[ESITO TEST: FALLITO] Errore nel conteggio.\n";
-    }
+    std::cout << "Elaborazione completata. File generato." << std::endl;
+    
 
     return 0;
-}
+} 
