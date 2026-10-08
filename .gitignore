@@ -69,3 +69,7 @@ Testing/
 .cache/
 Lab1/CP Lab1/.vscode/tasks.json
 Lab1/CP Lab1/.vscode/c_cpp_properties.json
+Lab1/Lab1b/.vscode/tasks.json
+Lab1/Lab1b/.vscode/c_cpp_properties.json
+Lab1/Lab1a/.vscode/c_cpp_properties.json
+Lab1/Lab1a/.vscode/tasks.json

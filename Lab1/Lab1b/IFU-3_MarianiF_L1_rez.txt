@@ -1,0 +1,38 @@
+No.  Segment Name                  Duration (s)   Avg Watts      Norm Power     
+--------------------------------------------------------------------------------
+1    Muro di Sormano               900            440.0          441.06         
+2    Zoncolan                      2500           410.0          411.14         
+3    Mortirolo                     2900           395.0          396.18         
+4    Tre Cime di Lavaredo          2300           392.0          393.19         
+5    Alto de l Angliru             3100           390.4          391.60         
+6    Col du Granon                 2600           388.0          389.21         
+7    Lagos de Covadonga            2400           385.0          386.21         
+8    Alpe d Huez                   2700           380.0          381.23         
+9    Hautacam                      2800           378.0          379.23         
+10   Passo Fedaia                  2800           375.0          376.24         
+11   Crest-Voland                  1800           370.0          371.26         
+12   Col de la Loze                3400           365.2          366.48         
+13   Plan di Montecampione         3200           362.0          363.29         
+14   Mont Ventoux                  3600           360.2          361.50         
+15   Passo Pordoi                  2100           355.0          356.32         
+16   Col d Izoard                  3300           352.0          353.33         
+17   Passo Gavia                   3800           350.0          351.33         
+18   Col de la Madeleine           3800           348.0          349.34         
+19   Passo dello Stelvio           4200           345.5          346.85         
+20   Monte Grappa                  4000           344.0          345.36         
+21   Passo San Gottardo            3700           342.0          343.37         
+22   Col du Tourmalet              3900           340.0          341.38         
+23   Colle dell Agnello            4200           339.0          340.38         
+24   Grossglockner                 4300           338.0          339.38         
+25   Col du Galibier               4100           335.8          337.19         
+26   Passo Bernina                 4400           332.0          333.41         
+27   Colle del Nivolet             4500           330.5          331.91         
+28   Passo Rombo                   4600           325.0          326.43         
+29   Sierra Nevada                 4900           322.0          323.45         
+30   Pico Veleta                   5400           320.0          321.46         
+--------------------------------------------------------------------------------
+
+Thread 0: 7 items passed, 7 total
+Thread 1: 8 items passed, 8 total
+Thread 2: 7 items passed, 7 total
+Thread 3: 8 items passed, 8 total
