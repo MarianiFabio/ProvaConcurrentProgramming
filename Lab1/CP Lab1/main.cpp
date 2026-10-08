@@ -198,7 +198,7 @@ void writeResultFile(const std::string& outputPath,
 // Bounded buffer monitor for items waiting to be processed
 class DataMonitor {
 private:
-    static const int CAPACITY = 15;
+    static const int CAPACITY = 1;
     ClimbData buffer[CAPACITY];
 
     int count = 0;
