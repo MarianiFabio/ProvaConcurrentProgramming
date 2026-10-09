@@ -9,6 +9,8 @@
 #include <fstream>
 #include <iomanip>
 #include "nlohmann/json.hpp" 
+#include <omp.h>
+
 
 using json = nlohmann::json;
 
