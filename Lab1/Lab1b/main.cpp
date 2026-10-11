@@ -123,7 +123,7 @@ public:
     // Inserts an item keeping the array sorted by normalizedPower
     void addItemSorted(const ClimbResult& item) {
         //Critical section, only one thread enters at a time to prevent race conditions
-        #pragma omp critical
+        #pragma omp critical(sorted_result_monitor)
         {
 
         int i = count - 1; 
