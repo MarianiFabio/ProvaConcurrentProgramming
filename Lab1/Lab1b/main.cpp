@@ -8,7 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include "nlohmann/json.hpp" 
+#include "include/nlohmann/json.hpp" 
 #include <omp.h>
 
 
@@ -197,68 +197,13 @@ void writeResultFile(const std::string& outputPath,
 }
 
 // [NO-AI]
-// Bounded buffer monitor for items waiting to be processed
-class DataMonitor {
-private:
-    static const int CAPACITY = 1;
-    ClimbData buffer[CAPACITY];
 
-    int count = 0;
-    int head = 0;
-    int tail = 0;
 
-    std::mutex mtx;                         
-    std::condition_variable not_full;        
-    std::condition_variable not_empty;      
-
-    bool finished = false;
-
-public:
-    // Called by the main thread when all items are pushed
-    void setFinished() {
-        std::unique_lock<std::mutex> lock(mtx);
-        finished = true;
-        not_empty.notify_all(); // Wake up all waiting workers so they can exit
-    }
-
-    // Called by the main thread to add raw data
-    void addItem(ClimbData item) {
-        std::unique_lock<std::mutex> lock(mtx);
-        
-        // Wait if buffer is full
-        not_full.wait(lock, [this]() { return count < CAPACITY; });
-
-        buffer[tail] = item;
-        tail = (tail + 1) % CAPACITY;
-        count++;
-
-        not_empty.notify_one();
-    }
-
-    // Called by workers to take an item
-    bool removeItem(ClimbData& climb) {
-        std::unique_lock<std::mutex> lock(mtx);
-        
-        // Wait until there is an item or input is done
-        not_empty.wait(lock, [this]() { return count > 0 || finished == true; });
-
-        // If empty and main finished, stop working
-        if (count == 0 && finished == true) {
-            return false;
-        }
-
-        climb = buffer[head];
-        head = (head + 1) % CAPACITY;
-        count--;
-
-        not_full.notify_one();
-        return true;
-    }
-};
+    
 
 // [NO-AI]
 // Task executed by worker threads
-void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& resultMonitor,
+/* void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& resultMonitor,
                 int& processedCount, int& passedCount) {
     ClimbData item;
 
@@ -279,49 +224,78 @@ void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& res
     }
 
     logLine("[WORKER ", workerId, "] Done.");
+} */
+void processDataPartition(int threadId, int totalThreads,
+                          const std::vector<ClimbData>& inputData,
+                          SortedResultMonitor& resultMonitor,
+                          int& totalDuration, double& totalWatts,
+                          int& processedCount, int& passedCount) {
+    int n = inputData.size();
+    int baseChunkSize = n / totalThreads;
+    int remainingElements = n % totalThreads;
+
+    // Calcolo equo di start ed end per questo thread
+    int start, end;
+    if (threadId < remainingElements) {
+        start = threadId * (baseChunkSize + 1);
+        end = start + (baseChunkSize + 1);
+    } else {
+        start = remainingElements * (baseChunkSize + 1) + (threadId - remainingElements) * baseChunkSize;
+        end = start + baseChunkSize;
+    }
+
+    // Ciclo sui dati assegnati a questo thread
+    for (int i = start; i < end; ++i) {
+        processedCount++;
+        ClimbData item = inputData[i];
+
+        // 1. Calcolo pesante: COMPLETAMENTE PARALLELO (fuori da critical!)
+        double np = computeNormalizedPower(item);
+
+        // 2. Filtro
+        if (np >= 300.0) {
+            passedCount++;
+            ClimbResult resItem{item, np};
+
+            // 3. SEZIONE CRITICA: solo per scrittura condivisa e accumulo somme!
+            #pragma omp critical
+            {
+                resultMonitor.addItemSorted(resItem);
+                totalDuration += item.durationSeconds;
+                totalWatts += item.averageWatts;
+            }
+        }
+    }
 }
 
 // [NO-AI]
 int main() {
     programStart = std::chrono::steady_clock::now();
 
-    DataMonitor dataMonitor;
     SortedResultMonitor resultMonitor;
 
     std::string filename = "IFU-3_MarianiF_L1_dat_1.json";
     std::vector<ClimbData> inputData = readDataFile(filename);
 
     const int NUM_WORKERS = 4;
-    std::vector<std::jthread> workers;
+
+
+    int totalDuration = 0;
+    double totalWatts = 0.0;
     std::vector<int> processedCounts(NUM_WORKERS, 0);
     std::vector<int> passedCounts(NUM_WORKERS, 0);
-    
-    // Spawn worker threads
-    for (int i = 0; i < NUM_WORKERS; i++) {
-        workers.push_back(std::jthread(
-            workerTask, i, std::ref(dataMonitor), std::ref(resultMonitor),
-            std::ref(processedCounts[i]), std::ref(passedCounts[i])
-        ));
-    }
 
-    // Main thread
-    logLine("[MAIN] Starting data insertion into DataMonitor...");
+    // REGIONE PARALLELA OPENMP (Sostituisce DataMonitor e std::jthread)
+    #pragma omp parallel num_threads(NUM_WORKERS) default(none) \
+        shared(inputData, resultMonitor, totalDuration, totalWatts, processedCounts, passedCounts)
+    {
+        int tid = omp_get_thread_num();
+        int total = omp_get_num_threads();
 
-    for (size_t i = 0; i < inputData.size(); ++i) {
-        dataMonitor.addItem(inputData[i]);
-        logLine("[MAIN] Inserted item ", (i + 1), "/", inputData.size(),
-                ": ", inputData[i].segmentName);
-    }
-
-    logLine("[MAIN] All items inserted. Calling setFinished().");
-    dataMonitor.setFinished();
-
-    // Wait for all workers to complete
-    for (int i = 0; i < NUM_WORKERS; i++) {
-        if (workers[i].joinable()) {
-            workers[i].join();
-        }
-    }
+        processDataPartition(tid, total, inputData, resultMonitor, 
+                             totalDuration, totalWatts, 
+                             processedCounts[tid], passedCounts[tid]);
+    } // <--- Qui c'è il JOIN automatico di OpenMP!
 
     // Save final output file
     writeResultFile("IFU-3_MarianiF_L1_rez.txt", resultMonitor, processedCounts, passedCounts);
