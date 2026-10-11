@@ -224,6 +224,8 @@ void processDataPartition(int threadId, int totalThreads,
         end = start + baseChunkSize;
     }
 
+    logLine("[Thread ", threadId, "] Started range [", start, " to ", end, ")");
+
     // Loop through this thread's assigned items
     for (int i = start; i < end; ++i) {
         processedCount++;
@@ -253,6 +255,11 @@ void processDataPartition(int threadId, int totalThreads,
 
 // [NO-AI]
 int main() {
+    #ifdef _OPENMP
+    std::cout << "OpenMP abilitato! Versione: " << _OPENMP << std::endl;
+#else
+    std::cout << "ATTENZIONE: OpenMP NON e' abilitato nel compilatore!" << std::endl;
+#endif
     programStart = std::chrono::steady_clock::now();
 
     SortedResultMonitor resultMonitor;
@@ -261,6 +268,7 @@ int main() {
     std::vector<ClimbData> inputData = readDataFile(filename);
 
     const int NUM_WORKERS = 4;
+    omp_set_dynamic(0);
 
     int totalDuration = 0;
     double totalWatts = 0.0;
