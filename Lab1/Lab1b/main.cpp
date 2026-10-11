@@ -1,7 +1,6 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <mutex>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -37,22 +36,22 @@ using json = nlohmann::json;
  *   and implemented without AI
  */
 
-// Simple mutex to avoid messy terminal text when multiple threads print
-std::mutex coutMutex;
 std::chrono::steady_clock::time_point programStart;
 
 // [AI-GENERATED]
 // Thread-safe console logger with millisecond timestamps to visualize concurrency
 template <typename... Args>
 void logLine(const Args&... args) {
-    std::lock_guard<std::mutex> lock(coutMutex);
-    const auto elapsedMilliseconds =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - programStart).count();
+    #pragma omp critical(console_log)
+    {
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - programStart).count();
 
-    std::cout << "[+" << std::setw(6) << std::setfill('0')
-              << elapsedMilliseconds << " ms] " << std::setfill(' ');
-    (std::cout << ... << args) << std::endl;
+        std::cout << "[+" << std::setw(6) << std::setfill('0')
+                  << elapsed << " ms] " << std::setfill(' ');
+        (std::cout << ... << args) << std::endl;
+    }
 }
 
 // Structure to store raw climb data from the file
@@ -273,15 +272,16 @@ int main() {
     #pragma omp parallel num_threads(NUM_WORKERS) default(none) \
         shared(inputData, resultMonitor, totalDuration, totalWatts, processedCounts, passedCounts)
     {
-        int tid = omp_get_thread_num();
+        // Each thread gets its ID (0 to N-1) and total thread count
+        int threadID = omp_get_thread_num();
         int total = omp_get_num_threads();
 
-        processDataPartition(tid, total, inputData, resultMonitor, 
+        processDataPartition(threadID, total, inputData, resultMonitor, 
                              totalDuration, totalWatts, 
-                             processedCounts[tid], passedCounts[tid]);
-    } // Implicit barrier: all threads join here before sequential execution continues
+                             processedCounts[threadID], passedCounts[threadID]);
+    } // OpenMP barrier: all threads wait and join here before moving on
 
-    // Save final output file
+    // Save table and sums to file
     writeResultFile("IFU-3_MarianiF_L1_rez.txt", resultMonitor, processedCounts, passedCounts, totalDuration, totalWatts);
 
     logLine("Done. Output file generated.");
