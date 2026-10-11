@@ -31,9 +31,7 @@ using json = nlohmann::json;
  *      2) Formatted text table export (writeResultFile)
  *      3) Synthetic CPU-bound workload simulation (computeNormalizedPower)
  *      4) Thread-safe console logging utility (logLine)
- * - All concurrent architectures (DataMonitor, SortedResultMonitor, thread
- *  lifecycle, critical sections, and conditional variables) were designed
- *   and implemented without AI
+ * - All concurrent architectures were designed and implemented without AI
  */
 
 std::chrono::steady_clock::time_point programStart;
@@ -139,7 +137,6 @@ public:
         }
     }
     // Called sequentially after all threads finish, so no lock needed
-    // (const because i need only to read the data and not to modify it)
     int getCount() const {
         return count;
     }
@@ -204,7 +201,7 @@ void writeResultFile(const std::string& outputPath,
 }
 
 // [NO-AI]
-// orker function: divides data equally between threads and processes each slice
+// worker function: divides data equally between threads and processes each slice
 void processDataPartition(int threadId, int totalThreads,
                           const std::vector<ClimbData>& inputData,
                           SortedResultMonitor& resultMonitor,
@@ -255,16 +252,11 @@ void processDataPartition(int threadId, int totalThreads,
 
 // [NO-AI]
 int main() {
-    #ifdef _OPENMP
-    std::cout << "OpenMP abilitato! Versione: " << _OPENMP << std::endl;
-#else
-    std::cout << "ATTENZIONE: OpenMP NON e' abilitato nel compilatore!" << std::endl;
-#endif
     programStart = std::chrono::steady_clock::now();
 
     SortedResultMonitor resultMonitor;
 
-    std::string filename = "IFU-3_MarianiF_L1_dat_1.json";
+    std::string filename = "IFU-3_MarianiF_L1_dat_2.json";
     std::vector<ClimbData> inputData = readDataFile(filename);
 
     const int NUM_WORKERS = 4;

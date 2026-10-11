@@ -1,0 +1,13 @@
+No.  Segment Name                  Duration (s)   Avg Watts      Norm Power     
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+Thread 0: 0 items passed, 0 total
+Thread 1: 0 items passed, 0 total
+Thread 2: 0 items passed, 0 total
+Thread 3: 0 items passed, 0 total
+
+--------------------------------------------------------------------------------
+TOTAL SUMS OF FILTERED RESULTS (Calculated via OpenMP):
+Total Duration (int):   0 seconds
+Total Avg Watts (float): 0.00 W
