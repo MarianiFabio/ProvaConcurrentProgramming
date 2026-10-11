@@ -1,9 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <thread>
 #include <mutex>
-#include <condition_variable>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -33,12 +31,13 @@ using json = nlohmann::json;
  *      1) JSON data parsing (readDataFile)
  *      2) Formatted text table export (writeResultFile)
  *      3) Synthetic CPU-bound workload simulation (computeNormalizedPower)
+ *      4) Thread-safe console logging utility (logLine)
  * - All concurrent architectures (DataMonitor, SortedResultMonitor, thread
  *  lifecycle, critical sections, and conditional variables) were designed
  *   and implemented without AI
  */
 
-// Mutex used to avoid mixed terminal output and prevent interleaved terminal lines
+// Simple mutex to avoid messy terminal text when multiple threads print
 std::mutex coutMutex;
 std::chrono::steady_clock::time_point programStart;
 
@@ -64,7 +63,7 @@ struct ClimbData {
 };
 
 // [AI-GENERATED]
-// Reads data from the input JSON file
+// Reads data from the input JSON file into a dynamic vector
 std::vector<ClimbData> readDataFile(const std::string& filePath) {
     std::vector<ClimbData> climbs;
     std::ifstream file(filePath);
@@ -114,18 +113,19 @@ double computeNormalizedPower(const ClimbData& climb) {
 }
 
 // [NO-AI]
-// Monitor for storing processed results in descending order
+// Monitor to save results in descending order using OpenMP critical section
 class SortedResultMonitor {
 private:
     static const int CAPACITY = 30; 
-    ClimbResult buffer[CAPACITY];       // Fixed-size array
-    int count = 0;                  
-    std::mutex mtx;                     // Ensures mutual exclusion across worker threads
+    ClimbResult buffer[CAPACITY];       // Static array for results
+    int count = 0;                      // Current number of items
 
 public:
     // Inserts an item keeping the array sorted by normalizedPower
     void addItemSorted(const ClimbResult& item) {
-        std::lock_guard<std::mutex> lock(mtx); 
+        //Critical section, only one thread enters at a time to prevent race conditions
+        #pragma omp critical
+        {
 
         int i = count - 1; 
 
@@ -137,25 +137,27 @@ public:
 
         buffer[i + 1] = item;
         count++; 
+        }
     }
-
-    int getCount() {
-        std::lock_guard<std::mutex> lock(mtx);
+    // Called sequentially after all threads finish, so no lock needed
+    // (const because i need only to read the data and not to modify it)
+    int getCount() const {
         return count;
     }
-
-    ClimbResult getItem(int index) {
-        std::lock_guard<std::mutex> lock(mtx);
+    // Called sequentially to export table rows
+    ClimbResult getItem(int index)  const {
         return buffer[index];
     }
 };
 
 // [AI-GENERATED]
-// Writes the final results and worker stats to the text file
+// Exports sorted results, per-worker statistics, and required total sums
 void writeResultFile(const std::string& outputPath, 
-                     SortedResultMonitor& resMon, 
+                     const SortedResultMonitor& resMon, 
                      const std::vector<int>& processed, 
-                     const std::vector<int>& passed) {
+                     const std::vector<int>& passed,
+                     int totalDuration,
+                     double totalWatts) {
     
     std::ofstream outFile(outputPath);
     if (!outFile.is_open()) {
@@ -186,45 +188,24 @@ void writeResultFile(const std::string& outputPath,
     }
     outFile << std::string(80, '-') << "\n\n";
 
-    // Print how much each worker did
+    // Per thread summary
     for (size_t id = 0; id < processed.size(); id++) {
         outFile << "Thread " << id << ": " 
                 << passed[id] << " items passed, " 
                 << processed[id] << " total\n";
     }
 
+    // Appended numerical field sums required by Lab 1b specification
+    outFile << "\n" << std::string(80, '-') << "\n";
+    outFile << "TOTAL SUMS OF FILTERED RESULTS (Calculated via OpenMP):\n";
+    outFile << "Total Duration (int):   " << totalDuration << " seconds\n";
+    outFile << "Total Avg Watts (float): " << std::fixed << std::setprecision(2) << totalWatts << " W\n";
+
     outFile.close();
 }
 
 // [NO-AI]
-
-
-    
-
-// [NO-AI]
-// Task executed by worker threads
-/* void workerTask(int workerId, DataMonitor& dataMonitor, SortedResultMonitor& resultMonitor,
-                int& processedCount, int& passedCount) {
-    ClimbData item;
-
-    // Loop until removeItem returns false
-    while (dataMonitor.removeItem(item)) {
-        processedCount++;
-        logLine("[WORKER ", workerId, "] Took item: ", item.segmentName);
-
-        // Heavy math done outside the monitors in parallel
-        double np = computeNormalizedPower(item);
-
-        // Filter: keep items above or equal to 300 watts
-        if (np >= 300.0) {
-            passedCount++;
-            ClimbResult resItem{item, np};
-            resultMonitor.addItemSorted(resItem);
-        }
-    }
-
-    logLine("[WORKER ", workerId, "] Done.");
-} */
+// orker function: divides data equally between threads and processes each slice
 void processDataPartition(int threadId, int totalThreads,
                           const std::vector<ClimbData>& inputData,
                           SortedResultMonitor& resultMonitor,
@@ -234,7 +215,7 @@ void processDataPartition(int threadId, int totalThreads,
     int baseChunkSize = n / totalThreads;
     int remainingElements = n % totalThreads;
 
-    // Calcolo equo di start ed end per questo thread
+    // Distribute remainder items (+1) to the first few threads so chunks are as equal as possible
     int start, end;
     if (threadId < remainingElements) {
         start = threadId * (baseChunkSize + 1);
@@ -244,26 +225,29 @@ void processDataPartition(int threadId, int totalThreads,
         end = start + baseChunkSize;
     }
 
-    // Ciclo sui dati assegnati a questo thread
+    // Loop through this thread's assigned items
     for (int i = start; i < end; ++i) {
         processedCount++;
         ClimbData item = inputData[i];
 
-        // 1. Calcolo pesante: COMPLETAMENTE PARALLELO (fuori da critical!)
+        // Heavy calculation runs in parallel outside any lock
         double np = computeNormalizedPower(item);
 
-        // 2. Filtro
+        // Filter
+        // Keep only climbs with normalized power >= 300 W
         if (np >= 300.0) {
             passedCount++;
             ClimbResult resItem{item, np};
-
-            // 3. SEZIONE CRITICA: solo per scrittura condivisa e accumulo somme!
-            #pragma omp critical
-            {
+                // Monitor protects itself internally with #pragma omp critical
                 resultMonitor.addItemSorted(resItem);
+                
+                // Atomic updates: fast hardware increment without full lock overhead
+                #pragma omp atomic
                 totalDuration += item.durationSeconds;
+                #pragma omp atomic
                 totalWatts += item.averageWatts;
-            }
+            
+                logLine("[Thread ", threadId, "]   -> Inserted: ", item.segmentName, " (NP: ", np, " W)");
         }
     }
 }
@@ -279,13 +263,13 @@ int main() {
 
     const int NUM_WORKERS = 4;
 
-
     int totalDuration = 0;
     double totalWatts = 0.0;
     std::vector<int> processedCounts(NUM_WORKERS, 0);
     std::vector<int> passedCounts(NUM_WORKERS, 0);
 
-    // REGIONE PARALLELA OPENMP (Sostituisce DataMonitor e std::jthread)
+    // OpenMP Fork-Join: creates N threads running the block below
+    // default(none) forces explicit declaration of all shared references    
     #pragma omp parallel num_threads(NUM_WORKERS) default(none) \
         shared(inputData, resultMonitor, totalDuration, totalWatts, processedCounts, passedCounts)
     {
@@ -295,10 +279,10 @@ int main() {
         processDataPartition(tid, total, inputData, resultMonitor, 
                              totalDuration, totalWatts, 
                              processedCounts[tid], passedCounts[tid]);
-    } // <--- Qui c'è il JOIN automatico di OpenMP!
+    } // Implicit barrier: all threads join here before sequential execution continues
 
     // Save final output file
-    writeResultFile("IFU-3_MarianiF_L1_rez.txt", resultMonitor, processedCounts, passedCounts);
+    writeResultFile("IFU-3_MarianiF_L1_rez.txt", resultMonitor, processedCounts, passedCounts, totalDuration, totalWatts);
 
     logLine("Done. Output file generated.");
     return 0;
