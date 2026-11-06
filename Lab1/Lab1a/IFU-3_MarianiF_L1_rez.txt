@@ -32,7 +32,7 @@ No.  Segment Name                  Duration (s)   Avg Watts      Norm Power
 30   Pico Veleta                   5400           320.0          321.46         
 --------------------------------------------------------------------------------
 
-Thread 0: 7 items passed, 7 total
-Thread 1: 8 items passed, 8 total
+Thread 0: 8 items passed, 8 total
+Thread 1: 7 items passed, 7 total
 Thread 2: 7 items passed, 7 total
 Thread 3: 8 items passed, 8 total
