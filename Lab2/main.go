@@ -3,11 +3,26 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"os"
+	"sort"
 	"time"
 )
+
+// ============================================================================
+// 0. LOGGING UTILS
+// ============================================================================
+
+// Memorizza l'istante esatto di avvio del programma
+var startTime = time.Now()
+
+// logMsg stampa un messaggio formattato aggiungendo i millisecondi trascorsi
+func logMsg(format string, args ...interface{}) {
+	elapsed := time.Since(startTime).Milliseconds()
+	// Crea un prefisso fisso di 6 caratteri per i millisecondi per avere stampe allineate
+	prefix := fmt.Sprintf("[%6d ms] ", elapsed)
+	fmt.Printf(prefix+format+"\n", args...) // Aggiunge \n in automatico
+}
 
 // ============================================================================
 // 1. STRUTTURE DATI
@@ -45,16 +60,19 @@ type FinalData struct {
 // ============================================================================
 
 func readDataFile(filePath string) []ClimbData {
-	file, err := os.Open(filePath)
+	// os.ReadFile apre, legge tutto e chiude il file in automatico
+	bytes, err := os.ReadFile(filePath)
 	if err != nil {
-		fmt.Println("Errore nell'apertura del file:", err)
+		fmt.Println("Errore nella lettura del file:", err)
 		return nil
 	}
-	defer file.Close()
 
-	bytes, _ := ioutil.ReadAll(file)
 	var j map[string][]ClimbData
-	json.Unmarshal(bytes, &j)
+	err = json.Unmarshal(bytes, &j)
+	if err != nil {
+		fmt.Println("Errore nel parsing del JSON:", err)
+		return nil
+	}
 	return j["climbs"]
 }
 
@@ -158,6 +176,11 @@ func ResultThread(resultChan <-chan ClimbResult, statsChan <-chan WorkerStats, n
 
 	for {
 		if finishedWorkers == numWorkers {
+			// ORDINA I RISULTATI ALLA FINE (Decrescente)
+			sort.Slice(results, func(i, j int) bool {
+				return results[i].NormalizedPower > results[j].NormalizedPower
+			})
+
 			// Invia tutto al MainProcess quando tutti i worker hanno terminato
 			mainResultChan <- FinalData{Results: results, Stats: stats}
 			break
@@ -165,14 +188,8 @@ func ResultThread(resultChan <-chan ClimbResult, statsChan <-chan WorkerStats, n
 
 		select {
 		case res := <-resultChan:
-			// Inserimento ordinato (decrescente) locale
-			idx := 0
-			for idx < len(results) && results[idx].NormalizedPower >= res.NormalizedPower {
-				idx++
-			}
-			results = append(results, ClimbResult{})
-			copy(results[idx+1:], results[idx:])
-			results[idx] = res
+			// Semplice append, velocissimo e non blocca il canale
+			results = append(results, res)
 
 		case stat := <-statsChan:
 			stats = append(stats, stat)
@@ -197,8 +214,7 @@ func WorkerThread(id int, removeReqChan chan<- WorkerRequest, resultChan chan<- 
 		}
 
 		processedCount++
-		fmt.Printf("[WORKER %d] Took item: %s\n", id, item.SegmentName)
-
+		logMsg("[WORKER %d] Took item: %s", id, item.SegmentName)
 		np := computeNormalizedPower(item)
 
 		if np >= 300.0 {
@@ -209,7 +225,7 @@ func WorkerThread(id int, removeReqChan chan<- WorkerRequest, resultChan chan<- 
 
 	// Al termine del ciclo, invia le statistiche al gestore dei risultati
 	statsChan <- WorkerStats{WorkerID: id, Processed: processedCount, Passed: passedCount}
-	fmt.Printf("[WORKER %d] Done.\n", id)
+	logMsg("[WORKER %d] Done.", id)
 }
 
 // ============================================================================
@@ -240,22 +256,20 @@ func main() {
 		go WorkerThread(i, removeReqChan, resultChan, statsChan)
 	}
 
-	fmt.Println("[MAIN] Starting data insertion...")
-
+	logMsg("[MAIN] Starting data insertion...")
 	// Il processo principale invia tutti gli elementi uno per uno
 	for _, item := range inputData {
 		insertChan <- item
-		fmt.Printf("[MAIN] Sent item: %s\n", item.SegmentName)
+		logMsg("[MAIN] Sent item: %s", item.SegmentName)
 	}
 
 	// Chiude il canale per segnalare al DataThread che l'inserimento è terminato
 	close(insertChan)
-	fmt.Println("[MAIN] All items sent. Waiting for results...")
-
+	logMsg("[MAIN] All items sent. Waiting for results...")
 	// Riceve il consolidamento finale dal ResultThread (Operazione bloccante)
 	finalData := <-mainResultChan
 
 	// Stampa su file
 	writeResultFile("IFU-3_MarianiF_L2_rez.txt", finalData)
-	fmt.Println("Done. Output file generated.")
+	logMsg("Done. Output file generated.")
 }
