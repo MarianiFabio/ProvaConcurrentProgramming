@@ -13,19 +13,19 @@ import (
 // 0. LOGGING UTILS
 // ============================================================================
 
-// Memorizza l'istante esatto di avvio del programma
+// Stores the exact program startup timestamp
 var startTime = time.Now()
 
-// logMsg stampa un messaggio formattato aggiungendo i millisecondi trascorsi
+// logMsg prints a formatted message including the elapsed milliseconds
 func logMsg(format string, args ...interface{}) {
 	elapsed := time.Since(startTime).Milliseconds()
-	// Crea un prefisso fisso di 6 caratteri per i millisecondi per avere stampe allineate
+	// Creates a fixed 6-character prefix for milliseconds to keep output aligned
 	prefix := fmt.Sprintf("[%6d ms] ", elapsed)
-	fmt.Printf(prefix+format+"\n", args...) // Aggiunge \n in automatico
+	fmt.Printf(prefix+format+"\n", args...) // Adds a newline automatically
 }
 
 // ============================================================================
-// 1. STRUTTURE DATI
+// 1. DATA STRUCTURES
 // ============================================================================
 
 type ClimbData struct {
@@ -39,7 +39,7 @@ type ClimbResult struct {
 	NormalizedPower float64
 }
 
-// Struttura usata dai worker per chiedere un elemento al DataThread (Request-Reply pattern)
+// Structure used by workers to request an item from the DataThread (Request-Reply pattern)
 type WorkerRequest struct {
 	ReplyChan chan ClimbData
 }
@@ -56,21 +56,21 @@ type FinalData struct {
 }
 
 // ============================================================================
-// 2. LOGICA SEQUENZIALE (Lettura, Scrittura, Calcolo)
+// 2. SEQUENTIAL LOGIC (Read, Write, Compute)
 // ============================================================================
 
 func readDataFile(filePath string) []ClimbData {
-	// os.ReadFile apre, legge tutto e chiude il file in automatico
+	// os.ReadFile opens, reads the entire file, and closes it automatically
 	bytes, err := os.ReadFile(filePath)
 	if err != nil {
-		fmt.Println("Errore nella lettura del file:", err)
+		fmt.Println("Error reading file:", err)
 		return nil
 	}
 
 	var j map[string][]ClimbData
 	err = json.Unmarshal(bytes, &j)
 	if err != nil {
-		fmt.Println("Errore nel parsing del JSON:", err)
+		fmt.Println("Error parsing JSON:", err)
 		return nil
 	}
 	return j["climbs"]
@@ -92,7 +92,7 @@ func computeNormalizedPower(climb ClimbData) float64 {
 func writeResultFile(outputPath string, finalData FinalData) {
 	file, err := os.Create(outputPath)
 	if err != nil {
-		fmt.Println("Errore nella creazione del file:", err)
+		fmt.Println("Error creating file:", err)
 		return
 	}
 	defer file.Close()
@@ -113,50 +113,50 @@ func writeResultFile(outputPath string, finalData FinalData) {
 }
 
 // ============================================================================
-// 3. PROCESSI CONCORRENTI (Memoria Distribuita e Canali Unbuffered)
+// 3. CONCURRENT PROCESSES (Distributed Memory and Unbuffered Channels)
 // ============================================================================
 
-// DataThread: Gestisce l'array isolato bloccando richieste invalide (troppo pieno o troppo vuoto)
+// DataThread: manages the isolated buffer while blocking invalid requests (too full or too empty)
 func DataThread(insertChan <-chan ClimbData, removeReqChan <-chan WorkerRequest, numWorkers int) {
-	const CAPACITY = 15 // Deve essere <= n/2
+	const CAPACITY = 15 // Must be <= n/2
 	buffer := make([]ClimbData, 0, CAPACITY)
 	mainFinished := false
 	workersToStop := numWorkers
 
 	for {
 		if workersToStop == 0 {
-			break // Termina quando tutti i worker hanno ricevuto il segnale di stop
+			break // Stops when all workers have received the stop signal
 		}
 
 		if len(buffer) == 0 {
 			if mainFinished {
-				// Il Main ha finito e il buffer è vuoto: invia segnale di terminazione ai worker
+				// The main process is done and the buffer is empty: send the termination signal to workers
 				req := <-removeReqChan
 				req.ReplyChan <- ClimbData{SegmentName: "EOF"}
 				workersToStop--
 			} else {
-				// Il buffer è vuoto, accetta solo messaggi di inserimento
+				// The buffer is empty, accept only insertion messages
 				item, ok := <-insertChan
 				if !ok {
 					mainFinished = true
 					insertChan = nil
 				} else {
 					buffer = append(buffer, item)
-					time.Sleep(1 * time.Millisecond) // Simula la possibilità di riempimento/svuotamento
+					time.Sleep(1 * time.Millisecond) // Simulates a fill/empty opportunity
 				}
 			}
 		} else if len(buffer) == CAPACITY {
-			// Il buffer è pieno, accetta solo richieste di rimozione dai worker
+			// The buffer is full, accept only removal requests from workers
 			req := <-removeReqChan
 			req.ReplyChan <- buffer[0]
 			buffer = buffer[1:]
 		} else {
-			// Il buffer non è né vuoto né pieno: usa un costrutto select per servire il primo che arriva
+			// The buffer is neither empty nor full: use select to serve whichever arrives first
 			select {
 			case item, ok := <-insertChan:
 				if !ok {
 					mainFinished = true
-					insertChan = nil // Disabilita questo ramo del select
+					insertChan = nil // Disables this branch of the select
 				} else {
 					buffer = append(buffer, item)
 				}
@@ -168,7 +168,7 @@ func DataThread(insertChan <-chan ClimbData, removeReqChan <-chan WorkerRequest,
 	}
 }
 
-// ResultThread: Gestisce array locale ordinato e riceve risultati e statistiche
+// ResultThread: manages the ordered local array and receives results and stats
 func ResultThread(resultChan <-chan ClimbResult, statsChan <-chan WorkerStats, numWorkers int, mainResultChan chan<- FinalData) {
 	var results []ClimbResult
 	var stats []WorkerStats
@@ -176,19 +176,19 @@ func ResultThread(resultChan <-chan ClimbResult, statsChan <-chan WorkerStats, n
 
 	for {
 		if finishedWorkers == numWorkers {
-			// ORDINA I RISULTATI ALLA FINE (Decrescente)
+			// SORT RESULTS AT THE END (descending)
 			sort.Slice(results, func(i, j int) bool {
 				return results[i].NormalizedPower > results[j].NormalizedPower
 			})
 
-			// Invia tutto al MainProcess quando tutti i worker hanno terminato
+			// Send everything to the main process once all workers have finished
 			mainResultChan <- FinalData{Results: results, Stats: stats}
 			break
 		}
 
 		select {
 		case res := <-resultChan:
-			// Semplice append, velocissimo e non blocca il canale
+			// Simple append, very fast, and does not block the channel
 			results = append(results, res)
 
 		case stat := <-statsChan:
@@ -198,19 +198,19 @@ func ResultThread(resultChan <-chan ClimbResult, statsChan <-chan WorkerStats, n
 	}
 }
 
-// WorkerThread: Processa dati prelevati e manda messaggi calcolati
+// WorkerThread: processes data items and sends computed results
 func WorkerThread(id int, removeReqChan chan<- WorkerRequest, resultChan chan<- ClimbResult, statsChan chan<- WorkerStats) {
 	processedCount := 0
 	passedCount := 0
-	replyChan := make(chan ClimbData) // Canale privato unbuffered di risposta
+	replyChan := make(chan ClimbData) // Private unbuffered response channel
 
 	for {
-		// Invia la richiesta al gestore dati
+		// Send the request to the data manager
 		removeReqChan <- WorkerRequest{ReplyChan: replyChan}
-		item := <-replyChan // Attende la risposta
+		item := <-replyChan // Wait for the response
 
 		if item.SegmentName == "EOF" {
-			break // Termina se non ci sono più dati
+			break // Stop when there is no more data
 		}
 
 		processedCount++
@@ -223,7 +223,7 @@ func WorkerThread(id int, removeReqChan chan<- WorkerRequest, resultChan chan<- 
 		}
 	}
 
-	// Al termine del ciclo, invia le statistiche al gestore dei risultati
+	// At the end of the loop, send statistics to the result manager
 	statsChan <- WorkerStats{WorkerID: id, Processed: processedCount, Passed: passedCount}
 	logMsg("[WORKER %d] Done.", id)
 }
@@ -238,38 +238,38 @@ func main() {
 		return
 	}
 
-	const NUM_WORKERS = 4 // Da 2 a n/4
+	const NUM_WORKERS = 4 // From 2 to n/4
 
-	// Canali Unbuffered per la comunicazione
+	// Unbuffered channels for communication
 	insertChan := make(chan ClimbData)
 	removeReqChan := make(chan WorkerRequest)
 	resultChan := make(chan ClimbResult)
 	statsChan := make(chan WorkerStats)
 	mainResultChan := make(chan FinalData)
 
-	// Avvia gestori
+	// Start managers
 	go DataThread(insertChan, removeReqChan, NUM_WORKERS)
 	go ResultThread(resultChan, statsChan, NUM_WORKERS, mainResultChan)
 
-	// Avvia Workers
+	// Start workers
 	for i := 0; i < NUM_WORKERS; i++ {
 		go WorkerThread(i, removeReqChan, resultChan, statsChan)
 	}
 
 	logMsg("[MAIN] Starting data insertion...")
-	// Il processo principale invia tutti gli elementi uno per uno
+	// The main process sends all items one by one
 	for _, item := range inputData {
 		insertChan <- item
 		logMsg("[MAIN] Sent item: %s", item.SegmentName)
 	}
 
-	// Chiude il canale per segnalare al DataThread che l'inserimento è terminato
+	// Close the channel to signal the DataThread that insertion is complete
 	close(insertChan)
 	logMsg("[MAIN] All items sent. Waiting for results...")
-	// Riceve il consolidamento finale dal ResultThread (Operazione bloccante)
+	// Receive the final consolidation from the ResultThread (blocking operation)
 	finalData := <-mainResultChan
 
-	// Stampa su file
+	// Write to file
 	writeResultFile("IFU-3_MarianiF_L2_rez.txt", finalData)
 	logMsg("Done. Output file generated.")
 }
